@@ -1,6 +1,9 @@
 # Environment variables (sensitive)
 .env
 
+# Claude Code configuration (local dev tool)
+.claude/
+
 # Python
 __pycache__/
 *.py[cod]
