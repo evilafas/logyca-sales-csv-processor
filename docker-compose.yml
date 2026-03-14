@@ -1,0 +1,73 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: logyca
+      POSTGRES_USER: logyca
+      POSTGRES_PASSWORD: logyca_secret
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U logyca -d logyca"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite
+    ports:
+      - "10000:10000"  # Blob
+      - "10001:10001"  # Queue
+      - "10002:10002"  # Table
+    volumes:
+      - azurite_data:/data
+    command: "azurite --blobHost 0.0.0.0 --queueHost 0.0.0.0 --tableHost 0.0.0.0 -l /data"
+
+  api:
+    build: .
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/code
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      azurite:
+        condition: service_started
+
+  worker:
+    build: .
+    command: python -m app.worker.consumer
+    volumes:
+      - .:/code
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      azurite:
+        condition: service_started
+
+  n8n:
+    image: n8nio/n8n
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_BASIC_AUTH_ACTIVE=false
+      - GENERIC_TIMEZONE=America/Bogota
+    volumes:
+      - n8n_data:/home/node/.n8n
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  azurite_data:
+  n8n_data:
