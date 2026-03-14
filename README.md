@@ -542,6 +542,55 @@ En vez de hacer `INSERT INTO sales VALUES (...)` por cada fila, se usa `COPY FRO
 
 Para escalar: se pueden agregar mas workers (replicas del servicio `worker` en Docker Compose) y PostgreSQL distribuira la carga naturalmente via la cola.
 
+#### Como funciona en detalle
+
+**Mecanismo 1 — Batches de 5,000 filas con COMMIT intermedio**
+
+En vez de insertar fila por fila (1 millon de `INSERT`), el worker acumula 5,000 filas y hace una sola operacion `COPY`. Luego hace `COMMIT`, libera locks, y PostgreSQL puede hacer limpieza interna (VACUUM/autovacuum) entre batches:
+
+```
+[fila 1..5000]     → COPY → COMMIT → libera locks
+[fila 5001..10000] → COPY → COMMIT → libera locks
+...
+```
+
+**Mecanismo 2 — COPY en lugar de INSERT**
+
+`psycopg2.copy_from()` usa el protocolo nativo de PostgreSQL para carga masiva. La diferencia de rendimiento es significativa:
+
+| Metodo | 1 millon de filas |
+|--------|-------------------|
+| `INSERT` individual | ~10-15 minutos |
+| `COPY` en batches de 5k | ~30-60 segundos |
+
+`COPY` es mas rapido porque salta el query planner, no genera un WAL entry por fila, y envia todo en una sola operacion de red.
+
+**Mecanismo 3 — Pool de conexiones con health checks**
+
+```python
+engine = create_engine(
+    DATABASE_URL,
+    pool_size=10,        # max 10 conexiones simultaneas
+    max_overflow=20,     # +20 en picos (30 total)
+    pool_pre_ping=True,  # testea la conexion antes de usarla
+    pool_recycle=1800    # recicla conexiones cada 30 min
+)
+```
+
+- Sin `pool_pre_ping`: una conexion "muerta" (timeout de red) causaria un error en runtime.
+- Sin `pool_recycle`: PostgreSQL cierra conexiones inactivas por timeout y el pool queda con conexiones zombie.
+
+**Mecanismo 4 — Un worker por mensaje via Queue**
+
+El visibility timeout de Azure Queue es 600 segundos. Cuando un worker toma un mensaje, ese mensaje desaparece de la cola por ese tiempo. Si otro worker aparece, no ve ese mensaje — nunca hay dos workers procesando el mismo archivo al mismo tiempo.
+
+```
+Worker A toma mensaje X → X invisible por 600s
+Worker B solo ve mensajes Y, Z → procesa en paralelo sin conflicto
+```
+
+Para escalar horizontalmente solo se agregan replicas del worker. Cada una usa su propia conexion del pool y PostgreSQL distribuye la carga naturalmente.
+
 ### 4. Azure local con Azurite
 
 **Azurite** es el emulador oficial de Microsoft para Azure Storage. Permite desarrollar y probar sin necesidad de una cuenta de Azure real. Los mismos SDKs de Python (`azure-storage-blob`, `azure-storage-queue`) funcionan de manera idéntica. Para producción, solo se cambia la `AZURE_STORAGE_CONNECTION_STRING` en el archivo `.env`.
