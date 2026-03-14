@@ -1,0 +1,36 @@
+# Environment variables (sensitive)
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+.eggs/
+.venv/
+venv/
+env/
+
+# Generated data files
+data/large_sample.csv
+data/*.csv
+!data/sample.csv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker volumes
+.docker/
+
+# Logs
+*.log
