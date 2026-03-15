@@ -116,18 +116,22 @@ class TestJobStatusEndpoint:
 
 
 class TestCompletedJobsEndpoint:
-    @patch("app.api.routes.get_db")
-    def test_completed_jobs_returns_list(self, mock_get_db, client, sample_job):
+    def test_completed_jobs_returns_list(self, client, sample_job):
         sample_job.status = "COMPLETED"
         sample_job.records_processed = 10
 
         mock_db = MagicMock()
         mock_db.query.return_value.filter.return_value.all.return_value = [sample_job]
-        mock_get_db.return_value = iter([mock_db])
 
-        response = client.get("/jobs/completed")
-        assert response.status_code == 200
-        data = response.json()
-        assert len(data) == 1
-        assert data[0]["status"] == "COMPLETED"
-        assert data[0]["records_processed"] == 10
+        from app.db.database import get_db
+        app.dependency_overrides[get_db] = lambda: mock_db
+
+        try:
+            response = client.get("/jobs/completed")
+            assert response.status_code == 200
+            data = response.json()
+            assert len(data) == 1
+            assert data[0]["status"] == "COMPLETED"
+            assert data[0]["records_processed"] == 10
+        finally:
+            app.dependency_overrides.clear()
